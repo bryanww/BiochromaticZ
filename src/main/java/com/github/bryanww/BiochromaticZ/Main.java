@@ -1,5 +1,7 @@
 package com.github.bryanww.BiochromaticZ;
 
+import com.github.bryanww.BiochromaticZ.managers.DroneManager;
+import com.github.bryanww.BiochromaticZ.managers.LarvaManager;
 import com.github.ocraft.s2client.api.S2Client;
 import com.github.ocraft.s2client.api.controller.S2Controller;
 import com.github.ocraft.s2client.protocol.action.raw.ActionRawUnitCommand;
@@ -12,7 +14,13 @@ import com.github.ocraft.s2client.protocol.response.ResponseCreateGame;
 import com.github.ocraft.s2client.protocol.response.ResponseJoinGame;
 import com.github.ocraft.s2client.protocol.response.ResponseObservation;
 import com.github.ocraft.s2client.protocol.response.ResponseStep;
+import com.github.ocraft.s2client.protocol.unit.Tag;
 import com.github.ocraft.s2client.protocol.unit.Unit;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import static com.github.ocraft.s2client.api.S2Client.starcraft2Client;
 import static com.github.ocraft.s2client.api.controller.S2Controller.starcraft2Game;
@@ -31,6 +39,10 @@ public class Main {
         S2Controller game = starcraft2Game().launch();
         S2Client client = starcraft2Client().connectTo(game).traced(true).start();
 
+        LarvaManager larvaManager = new LarvaManager();
+        DroneManager droneManager = new DroneManager();
+        Map<Tag, Unit> knownUnits = new HashMap<>();
+
         client.request(createGame()
                 .onBattlenetMap(BattlenetMap.of("Lava Flow"))
                 .withPlayerSetup(participant(), computer(PROTOSS, Difficulty.MEDIUM)));
@@ -46,27 +58,22 @@ public class Main {
                     response.as(ResponseObservation.class).ifPresent(r  -> {
                         // HERE GOES BOT LOGIC
                         r.getObservation().getRaw().ifPresent(w -> {
-                            int mineralsSpentThisStep = 0;
                             for (Unit u :w.getUnits()) {
-                                if (u.getType() == Units.ZERG_LARVA) {
-                                    if (r.getObservation().getPlayerCommon().getMinerals() - mineralsSpentThisStep >= 100
-                                            && r.getObservation().getPlayerCommon().getFoodUsed() >= (r.getObservation().getPlayerCommon().getFoodCap() * 0.8)) {
-                                        client.request(actions().of(
-                                                action().raw(ActionRawUnitCommand.unitCommand().forUnits(u.getTag()).useAbility(TRAIN_OVERLORD))
-                                        ));
-                                        mineralsSpentThisStep += 100;
+                                if (!knownUnits.containsKey(u.getTag())) {
+                                    if (u.getType() == Units.ZERG_LARVA) {
+                                        larvaManager.addLarva(u);
+                                    } else if (u.getType() == Units.ZERG_DRONE) {
+                                        droneManager.addDrone(u);
                                     }
-
-                                    if (r.getObservation().getPlayerCommon().getMinerals() - mineralsSpentThisStep >= 50
-                                            && r.getObservation().getPlayerCommon().getFoodUsed() < (r.getObservation().getPlayerCommon().getFoodCap() - 1)) {
-                                        client.request(actions().of(
-                                                action().raw(ActionRawUnitCommand.unitCommand().forUnits(u.getTag()).useAbility(TRAIN_DRONE))
-                                        ));
-                                        mineralsSpentThisStep += 50;
-                                    }
+                                    // enemies
+                                    // minerals
+                                    // army units
+                                    knownUnits.put(u.getTag(), u);
                                 }
                             }
                         });
+
+                        larvaManager.trainNextUnit(r, client);
 
                         client.request(nextStep());
                     });
